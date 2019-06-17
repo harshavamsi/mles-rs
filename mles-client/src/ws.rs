@@ -10,6 +10,11 @@ use std::time::Duration;
 use std::str;
 use std::borrow::Cow;
 
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
+use std::mem;
+
 use futures::stream::Stream;
 use futures::sync::mpsc::unbounded;
 use futures::{Future, Sink};
@@ -78,6 +83,8 @@ pub fn process_ws_proxy(raddr: SocketAddr, keyval: String, keyaddr: String) {
             }
             Err(tungstenite::Error::Protocol(Cow::from(SECPROT)))
         };
+        //let mles_db_hash: HashMap<String, MlesDb> = HashMap::new();
+        //let mles_db = Rc::new(RefCell::new(mles_db_hash));
 
         let accept = accept_hdr_async(stream, callback).map_err(|err|{
             println!("Accept error: {}", err);
@@ -127,11 +134,11 @@ pub fn process_ws_proxy(raddr: SocketAddr, keyval: String, keyaddr: String) {
                             }
                         }
 
-                        let (sink, stream) = Bytes.framed(stream).split();
+                        let (mut sink, stream) = Bytes.framed(stream).split();
 
                         let mles_rx = mles_rx.map_err(|_| panic!()); // errors not possible on rx XXX
 
-                        let mles_rx = mles_rx.and_then(move |buf: Vec<_>| {
+                        let mles_rx = mles_rx.for_each(move |buf: Vec<_>| {
                             if None == key {
                                 //create hash for verification
                                 let decoded_message = Msg::decode(buf.as_slice());
@@ -148,12 +155,16 @@ pub fn process_ws_proxy(raddr: SocketAddr, keyval: String, keyaddr: String) {
                             let msghdr = MsgHdr::new(buf.len() as u32, cid.unwrap(), key.unwrap());
                             let mut msgv = msghdr.encode();
                             msgv.extend(buf);
-                            Ok(msgv)
+                            let _ = sink.start_send(msgv).map_err(|err| {
+                                Error::new(ErrorKind::Other, err)
+                            });
+                            let _ = sink.poll_complete().map_err(|err| {
+                                Error::new(ErrorKind::Other, err)
+                            });
+                            Ok(())
                         });
 
-                        //let iter = stream::iter_ok::<_, io::Error>(iter::repeat(()));
-                        //let socket_reader = iter.fold(sink, move |sink, _| {
-                        let send_wsrx = mles_rx.forward(sink);
+                        //let send_wsrx = mles_rx.forward(sink);
                         let write_wstx = stream.for_each(move |buf| {
                             let ws_tx = ws_tx_inner.clone();
                             // send to websocket
@@ -164,11 +175,19 @@ pub fn process_ws_proxy(raddr: SocketAddr, keyval: String, keyaddr: String) {
                             Ok(())
                         });
 
-                        send_wsrx
-                            .map(|_| ())
-                            .select(write_wstx.map(|_| ()))
-                            .then(|_| { println!("We are in ok");Ok(())})
-                    }).map_err(|_| {println!("We are in error");});
+                        let send_wsrx = mles_rx.map(|_| {}).map_err(|_| {});
+                        TaskExecutor::current().spawn_local(Box::new(send_wsrx.then(move |_| {
+                            println!("Connection rx closed.");
+                            Ok(())
+                        }))).unwrap();
+                        
+                        let write_wstx = write_wstx.map(|_| ()).map_err(|_| {});
+                        TaskExecutor::current().spawn_local(Box::new(write_wstx.then(move |_| {
+                            println!("Connection tx closed.");
+                            Ok(())
+                        }))).unwrap();
+                        Ok(())
+                    }).map_err(|_| {});
                     TaskExecutor::current().spawn_local(Box::new(client.then(move |_| {
                         println!("Connection {} proxy closed.", cnt);
                         Ok(())
