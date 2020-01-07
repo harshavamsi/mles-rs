@@ -31,7 +31,7 @@
 /*
  * Mles client example based on Tokio core-connect example.
  */
-mod ws;
+//mod ws;
 
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
@@ -40,20 +40,21 @@ use std::time::Duration;
 use std::{env, process};
 
 use bytes::BytesMut;
-use futures::sync::mpsc;
+use futures::channel::mpsc;
 use futures::{Future, Sink, Stream};
 use mles_utils::*;
 use tokio::net::TcpStream;
-use tokio::runtime::current_thread::Runtime;
-use tokio_codec::{Decoder, Encoder};
+//use tokio::runtime::current_thread::Runtime;
+use tokio_util::codec::{Decoder, Encoder};
 
-use crate::ws::*;
+//use crate::ws::*;
 
 const SRVPORT: &str = ":8077";
 const USAGE: &str = "Usage: mles-client <server-address> [--use-websockets]";
 const KEEPALIVE: u64 = 5;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let mut ws_enabled: Option<bool> = None;
 
     // Parse what address we're going to connect to
@@ -98,12 +99,12 @@ fn main() {
 
     if ws_enabled.is_some() {
         /* Websocket proxy support */
-        process_ws_proxy(raddr, keyval, keyaddr);
+        //process_ws_proxy(raddr, keyval, keyaddr);
     } else {
         // Handle stdin in a separate thread
         let (stdin_tx, stdin_rx) = mpsc::channel(16);
 
-        let mut runtime = Runtime::new().unwrap();
+        //let mut runtime = Runtime::new().unwrap();
         let tcp = TcpStream::connect(&raddr);
         let mut cid: Option<u32> = None;
         let mut key: Option<u64> = None;
@@ -181,15 +182,17 @@ fn main() {
                     .then(|_| Ok(()))
             })
             .map_err(|_| {});
+			
+			client.await;
 
-        runtime.spawn(client);
+        /*runtime.spawn(client);
         match runtime.run() {
             Ok(_) => {}
             Err(err) => {
                 println!("Error: {}", err);
                 process::exit(1);
             }
-        };
+        };*/
     }
 }
 

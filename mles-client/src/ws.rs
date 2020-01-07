@@ -11,7 +11,7 @@ use std::str;
 use std::time::Duration;
 
 use futures::stream::Stream;
-use futures::sync::mpsc::unbounded;
+use futures::channel::mpsc::unbounded;
 use futures::{Future, Sink};
 use tokio::net::TcpListener;
 use tokio::runtime::current_thread::{Runtime, TaskExecutor};
