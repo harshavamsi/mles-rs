@@ -2,9 +2,9 @@
 *  License, v. 2.0. If a copy of the MPL was not distributed with this
 *  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 *
-*  Copyright (C) 2017-2018  Mles developers
+*  Copyright (C) 2017-2022  Mles developers
 * */
-use futures::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::UnboundedSender;
 use std::collections::HashMap;
 
 use bytes::Bytes;

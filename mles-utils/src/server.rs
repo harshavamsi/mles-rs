@@ -16,13 +16,15 @@ use std::thread;
 use std::time::Duration;
 
 use tokio::io;
-use tokio::io::AsyncRead;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tokio::runtime::current_thread::{Runtime, TaskExecutor};
+use tokio::runtime;
 
-use futures::stream::{self, Stream};
-use futures::sync::mpsc::unbounded;
-use futures::Future;
+use futures::stream::{self, StreamExt};
+use tokio::sync::mpsc::unbounded_channel;
+use futures::FutureExt;
+use futures::TryFutureExt;
 
 use bytes::{Bytes, BytesMut};
 
@@ -39,8 +41,11 @@ pub(crate) fn run(
     hist_limit: usize,
     debug_flags: u64,
 ) {
-    let mut runtime = Runtime::new().unwrap();
+	let mut rt = runtime::Builder::new_current_thread()
+		.build()
+		.unwrap();
 
+	rt.block_on(async move {
     let socket = match TcpListener::bind(&address) {
         Ok(listener) => listener,
         Err(err) => {
@@ -94,18 +99,18 @@ pub(crate) fn run(
             }
 
             let (reader, writer) = stream.split();
-            let (tx, rx) = unbounded();
-            let (tx_removals, rx_removals) = unbounded();
+            let (tx, rx) = unbounded_channel();
+            let (tx_removals, rx_removals) = unbounded_channel();
 
-            let (tx_peer_for_msgs, rx_peer_for_msgs) = unbounded();
-            let (tx_peer_remover, rx_peer_remover) = unbounded();
+            let (tx_peer_for_msgs, rx_peer_for_msgs) = unbounded_channel();
+            let (tx_peer_remover, rx_peer_remover) = unbounded_channel();
 
-            let frame = io::read_exact(reader, BytesMut::from(vec![0; HDRKEYL]));
+            let frame = AsyncReadExt::read_exact(reader, BytesMut::with_capacity(HDRKEYL));
             let frame = frame.and_then(move |(reader, hdr_key)| process_hdr(reader, hdr_key));
             let frame = frame.and_then(move |(reader, hdr_key, hdr_len)| {
-                let mut hdr = BytesMut::from(vec![0; HDRKEYL + hdr_len]);
+                let mut hdr = BytesMut::with_capacity(HDRKEYL + hdr_len);
                 let message = hdr.split_off(HDRKEYL);
-                let tframe = io::read_exact(reader, message);
+                let tframe = AsyncReadExt::read_exact(reader, message);
                 tframe.and_then(move |(reader, message)| {
                     hdr.copy_from_slice(hdr_key.as_ref());
                     process_msg(reader, hdr_key, message)
@@ -183,7 +188,7 @@ pub(crate) fn run(
                             //sending tx to peer
                             let _res =
                                 channelpeer_entry
-                                    .unbounded_send(tx_inner.clone())
+                                    .send(tx_inner.clone())
                                     .map_err(|err| {
                                         println!("Cannot reach peer: {}", err);
                                         ()
@@ -196,7 +201,7 @@ pub(crate) fn run(
                     } else {
                         // send history to client if peer is not set
                         for msg in mles_db_entry.get_messages() {
-                            let _res = tx_inner.unbounded_send(msg.clone()).map_err(|err| {
+                            let _res = tx_inner.send(msg.clone()).map_err(|err| {
                                 println!("Send history failed: {}", err);
                                 ()
                             });
@@ -212,9 +217,9 @@ pub(crate) fn run(
                         for msg in &messages {
                             for (ocid, tx) in channels.iter() {
                                 if *ocid != cid {
-                                    let _res = tx.unbounded_send(msg.clone()).map_err(|_| {
+                                    let _res = tx.send(msg.clone()).map_err(|_| {
                                         let _rem = tx_removals_iter
-                                            .unbounded_send((*ocid, channel.clone()))
+                                            .send((*ocid, channel.clone()))
                                             .map_err(|_| ());
                                     });
                                 }
@@ -252,14 +257,14 @@ pub(crate) fn run(
                 let tx_removals_iter = tx_removals.clone();
                 let iter = stream::iter_ok(iter::repeat(()).map(Ok::<(), Error>));
                 iter.fold(reader, move |reader, _| {
-                    let frame = io::read_exact(reader, BytesMut::from(vec![0; HDRKEYL]));
+                    let frame = AsyncReadExt::read_exact(reader, BytesMut::with_capacity(HDRKEYL));
                     let frame = frame
                         .and_then(move |(reader, hdr_key)| process_hdr_dummy_key(reader, hdr_key));
 
                     let frame = frame.and_then(move |(reader, hdr_key, hdr_len)| {
-                        let mut hdr = BytesMut::from(vec![0; HDRKEYL + hdr_len]);
+                        let mut hdr = BytesMut::with_capacity(HDRKEYL + hdr_len);
                         let message = hdr.split_off(HDRKEYL);
-                        let tframe = io::read_exact(reader, message);
+                        let tframe = AsyncReadExt::read_exact(reader, message);
                         tframe.and_then(move |(reader, message)| {
                             hdr.copy_from_slice(hdr_key.as_ref());
                             process_msg(reader, hdr_key, message)
@@ -306,9 +311,9 @@ pub(crate) fn run(
                                 for (ocid, tx) in channels.iter() {
                                     let channel_rem = channel_clone.clone();
                                     if *ocid != cid {
-                                        let _res = tx.unbounded_send(msg.clone()).map_err(|_| {
+                                        let _res = tx.send(msg.clone()).map_err(|_| {
                                             let _rem = tx_removals
-                                                .unbounded_send((*ocid, channel_rem))
+                                                .send((*ocid, channel_rem))
                                                 .map_err(|_| ());
                                         });
                                     }
@@ -332,7 +337,7 @@ pub(crate) fn run(
                         for tx_entry in mles_db_entry.get_tx_db() {
                             let _res =
                                 tx_orig_chan
-                                    .unbounded_send(tx_entry.clone())
+                                    .send(tx_entry.clone())
                                     .map_err(|err| {
                                         println!("Cannot reach peer: {}", err);
                                         ()
@@ -341,9 +346,7 @@ pub(crate) fn run(
                     }
                     Ok(())
                 });
-            TaskExecutor::current()
-                .spawn_local(Box::new(peer_writer.then(|_| Ok(()))))
-                .unwrap();
+ 	    tokio::spawn(Box::new(peer_writer.then(|_| Ok(()))));
 
             let mles_db_inner = mles_db.clone();
             let peer_remover = rx_peer_remover.for_each(move |(channel, peer_cid)| {
@@ -359,9 +362,7 @@ pub(crate) fn run(
                 }
                 Ok(())
             });
-            TaskExecutor::current()
-                .spawn_local(Box::new(peer_remover.then(|_| Ok(()))))
-                .unwrap();
+	    tokio::spawn(Box::new(peer_remover.then(|_| Ok(()))));
 
             let mles_db_inner = mles_db.clone();
             let channel_removals = rx_removals.for_each(move |(cid, channel)| {
@@ -372,13 +373,11 @@ pub(crate) fn run(
                 }
                 Ok(())
             });
-            TaskExecutor::current()
-                .spawn_local(Box::new(channel_removals.then(|_| Ok(()))))
-                .unwrap();
+            tokio::spawn(Box::new(channel_removals.then(|_| Ok(()))));
 
             let socket_writer = rx.fold(writer, |writer, msg| {
                 let msg = Bytes::from(msg);
-                let amt = io::write_all(writer, msg);
+                let amt = AsyncWriteExt::write_all(writer, msg);
                 let amt = amt.map(|(writer, _)| writer);
                 amt.map_err(|_| ())
             });
@@ -387,8 +386,7 @@ pub(crate) fn run(
             let channel_db_conn = channel_db.clone();
             let socket_reader = socket_next.map_err(|_| ());
             let connection = socket_reader.map(|_| ()).select(socket_writer.map(|_| ()));
-            TaskExecutor::current()
-                .spawn_local(Box::new(connection.then(move |_| {
+	    tokio::spawn(Box::new(connection.then(move |_| {
                     let mut mles_db = mles_db_conn.borrow_mut();
                     let mut channel_db = channel_db_conn.borrow_mut();
                     let mut chan_to_rem: Option<u64> = None;
@@ -415,17 +413,11 @@ pub(crate) fn run(
                         }
                     }
                     Ok(())
-                })))
-                .unwrap();
+                })));
             Ok(())
         })
         .map_err(|e| {
             println!("Got error {:?}!", e);
         });
-
-    // spawn the server itself
-    runtime.spawn(srv);
-
-    // execute server
-    let _res = runtime.run();
+});
 }
