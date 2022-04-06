@@ -31,11 +31,11 @@ use bytes::{Bytes, BytesMut};
 use super::*;
 use crate::frame::*;
 use crate::local_db::*;
-use crate::peer::*;
+//use crate::peer::*;
 
 pub(crate) fn run(
     address: SocketAddr,
-    peer: Option<SocketAddr>,
+    //peer: Option<SocketAddr>,
     keyval: String,
     keyaddr: String,
     hist_limit: usize,
@@ -46,7 +46,7 @@ pub(crate) fn run(
 		.unwrap();
 
 	rt.block_on(async move {
-    let socket = match TcpListener::bind(&address) {
+    let listener = match TcpListener::bind(&address).await {
         Ok(listener) => listener,
         Err(err) => {
             println!("Error: {}", err);
@@ -63,8 +63,15 @@ pub(crate) fn run(
 
     let mut cnt = 0;
 
+    loop {
+        match listener.accept().await {
+	Err(err) => {
+		println!("Error: {}", err);
+		process::exit(1);
+	}
+	Ok((socket, _)) => {
+
     let srv = socket
-        .incoming()
         .for_each(move |stream| {
             let _val = stream
                 .set_nodelay(true)
@@ -79,13 +86,17 @@ pub(crate) fn run(
             if 0 != debug_flags {
                 println!("New connection: {}", addr);
             }
+	    /*
             let paddr = match stream.peer_addr() {
                 Ok(paddr) => paddr,
                 Err(_) => {
                     let addr = "0.0.0.0:0";
                     addr.parse::<SocketAddr>().unwrap()
                 }
-            };
+            };*/
+	    let addr = "0.0.0.0:0";
+	    let paddr = addr.parse::<SocketAddr>().unwrap();
+
             let mut is_addr_set = false;
             let mut keys = Vec::new();
             if !keyval.is_empty() {
@@ -110,7 +121,7 @@ pub(crate) fn run(
             let frame = frame.and_then(move |(reader, hdr_key, hdr_len)| {
                 let mut hdr = BytesMut::with_capacity(HDRKEYL + hdr_len);
                 let message = hdr.split_off(HDRKEYL);
-                let tframe = AsyncReadExt::read_exact(reader, message);
+                let tframe = AsyncReadExt::read_exact(reader, &mut message);
                 tframe.and_then(move |(reader, message)| {
                     hdr.copy_from_slice(hdr_key.as_ref());
                     process_msg(reader, hdr_key, message)
@@ -142,6 +153,7 @@ pub(crate) fn run(
 
                 if !mles_db_once.contains_key(&channel) {
                     //if peer is set, create peer channel thread
+		    /*
                     if peer::has_peer(&peer) {
                         let peer = peer.unwrap();
                         thread::spawn(move || {
@@ -157,7 +169,7 @@ pub(crate) fn run(
                                 debug_flags,
                             )
                         });
-                    }
+                    }*/
 
                     let mut mles_db_entry = MlesDb::new(hist_limit);
                     mles_db_entry.add_channel(cid, tx_inner.clone());
@@ -168,6 +180,7 @@ pub(crate) fn run(
                         return Err(Error::new(ErrorKind::BrokenPipe, "duplicate cid"));
                     }
                     mles_db_entry.add_channel(cid, tx_inner.clone());
+/*
                     if peer::has_peer(&peer) {
                         let peer = peer.unwrap();
                         if !mles_db_entry.check_peer() {
@@ -199,6 +212,7 @@ pub(crate) fn run(
                             }
                         }
                     } else {
+*/
                         // send history to client if peer is not set
                         for msg in mles_db_entry.get_messages() {
                             let _res = tx_inner.send(msg.clone()).map_err(|err| {
@@ -206,7 +220,7 @@ pub(crate) fn run(
                                 ()
                             });
                         }
-                    }
+                    //}
                 } else {
                     println!("Channel {} not found", channel);
                     return Err(Error::new(ErrorKind::BrokenPipe, "internal error"));
@@ -227,7 +241,7 @@ pub(crate) fn run(
                         }
                     }
                     // add to history if no peer
-                    if !peer::has_peer(&peer) {
+                    //if !peer::has_peer(&peer) {
                         if messages.len() > 1 && 0 == mles_db_entry.get_messages_len() {
                             // resync messages to history
                             for msg in &messages {
@@ -237,7 +251,7 @@ pub(crate) fn run(
                         } else {
                             mles_db_entry.add_message(message);
                         }
-                    }
+                    //}
 
                     mles_db_entry.add_tx_db(tx_inner.clone());
                 }
@@ -264,7 +278,7 @@ pub(crate) fn run(
                     let frame = frame.and_then(move |(reader, hdr_key, hdr_len)| {
                         let mut hdr = BytesMut::with_capacity(HDRKEYL + hdr_len);
                         let message = hdr.split_off(HDRKEYL);
-                        let tframe = AsyncReadExt::read_exact(reader, message);
+                        let tframe = AsyncReadExt::read_exact(reader, &mut message);
                         tframe.and_then(move |(reader, message)| {
                             hdr.copy_from_slice(hdr_key.as_ref());
                             process_msg(reader, hdr_key, message)
@@ -284,7 +298,7 @@ pub(crate) fn run(
 
                         let mut mles_db_borrow = mles_db.borrow_mut();
                         if let Some(mles_db_entry) = mles_db_borrow.get_mut(&channel) {
-                            if peer::has_peer(&peer) {
+                            /*if peer::has_peer(&peer) {
                                 if !mles_db_entry.check_peer() {
                                     let peer = peer.unwrap();
                                     let msg = msg.clone();
@@ -302,10 +316,10 @@ pub(crate) fn run(
                                         )
                                     });
                                 }
-                            } else {
+                            } else {*/
                                 // add to history if no peer
                                 mles_db_entry.add_message(msg.clone());
-                            }
+                            //}
 
                             if let Some(channels) = mles_db_entry.get_channels() {
                                 for (ocid, tx) in channels.iter() {
@@ -326,6 +340,7 @@ pub(crate) fn run(
             });
 
             let mles_db_inner = mles_db.clone();
+/*
             let peer_writer =
                 rx_peer_for_msgs.for_each(move |(peer_cid, channel, peer_tx, tx_orig_chan)| {
                     let mut mles_db_once = mles_db_inner.borrow_mut();
@@ -347,8 +362,10 @@ pub(crate) fn run(
                     Ok(())
                 });
  	    tokio::spawn(Box::new(peer_writer.then(|_| Ok(()))));
+*/
 
             let mles_db_inner = mles_db.clone();
+/*
             let peer_remover = rx_peer_remover.for_each(move |(channel, peer_cid)| {
                 let cid = clear_peer_cid(peer_cid);
                 println!("Removing peer cid {:x}, cid {:x}", peer_cid, cid);
@@ -363,6 +380,7 @@ pub(crate) fn run(
                 Ok(())
             });
 	    tokio::spawn(Box::new(peer_remover.then(|_| Ok(()))));
+*/
 
             let mles_db_inner = mles_db.clone();
             let channel_removals = rx_removals.for_each(move |(cid, channel)| {
@@ -377,7 +395,7 @@ pub(crate) fn run(
 
             let socket_writer = rx.fold(writer, |writer, msg| {
                 let msg = Bytes::from(msg);
-                let amt = AsyncWriteExt::write_all(writer, msg);
+                let amt = AsyncWriteExt::write_all(writer, &mut msg);
                 let amt = amt.map(|(writer, _)| writer);
                 amt.map_err(|_| ())
             });
@@ -419,5 +437,8 @@ pub(crate) fn run(
         .map_err(|e| {
             println!("Got error {:?}!", e);
         });
+}
+}
+}
 });
 }

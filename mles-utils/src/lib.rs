@@ -15,7 +15,7 @@ extern crate serde_cbor;
 
 mod frame;
 mod local_db;
-mod peer;
+//mod peer;
 mod server;
 
 use siphasher::sip::SipHasher;
@@ -994,10 +994,10 @@ fn read_cid_from_hdr(hdrv: &[u8]) -> u32 {
 /// let sockaddr = None;
 /// assert_eq!(false, has_peer(&sockaddr));
 /// ```
-#[inline]
+/*#[inline]
 pub fn has_peer(peer: &Option<SocketAddr>) -> bool {
     peer::has_peer(peer)
-}
+}*/
 
 fn read_n<R>(reader: R, bytes_to_read: usize) -> (Result<usize, Error>, Vec<u8>)
 where
@@ -1029,13 +1029,14 @@ where
 #[inline]
 pub fn server_run(
     address: SocketAddr,
-    peer: Option<SocketAddr>,
+    //peer: Option<SocketAddr>,
     keyval: String,
     keyaddr: String,
     hist_limit: usize,
     debug_flags: u64,
 ) {
-    server::run(address, peer, keyval, keyaddr, hist_limit, debug_flags);
+    //server::run(address, peer, keyval, keyaddr, hist_limit, debug_flags);
+    server::run(address, keyval, keyaddr, hist_limit, debug_flags);
 }
 
 #[cfg(test)]
@@ -1215,6 +1216,7 @@ mod tests {
         drop(child);
     }
 
+/*
     #[test]
     fn test_msgconn_peer_send_read() {
         let sec = Duration::new(1, 0);
@@ -1308,6 +1310,7 @@ mod tests {
         //drop server
         drop(child);
     }
+*/
 
     #[test]
     fn test_msgconn_basic_read_send() {
