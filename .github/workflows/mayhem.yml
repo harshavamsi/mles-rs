@@ -7,7 +7,9 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  MAYHEMFILE: Mayhemfile
+  MLES_FUZZ_DECODE_COMBINED: mles_fuzz_decode_combined.mayhemfile
+  MLES_FUZZ_DECODE: mles_fuzz_decode.mayhemfile
+  MLES_FUZZ_MSG_DECODE: mles_fuzz_msg_decode.mayhemfile
 
 jobs:
   build:
@@ -46,11 +48,25 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Start analysis
+      - name: Start mles_fuzz_decode_combined analysis
         uses: ForAllSecure/mcode-action@v1
         with:
           mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
-          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.MAYHEMFILE }}
+          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.MLES_FUZZ_DECODE_COMBINED }}
+          sarif-output: sarif
+
+      - name: Start mles_fuzz_decode analysis
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.MLES_FUZZ_DECODE }}
+          sarif-output: sarif
+
+      - name: Start mles_fuzz_msg_decode analysis
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.MLES_FUZZ_MSG_DECODE }}
           sarif-output: sarif
 
       - name: Upload SARIF file(s)

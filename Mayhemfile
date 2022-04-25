@@ -1,7 +1,0 @@
-project: mles
-target: mles
-
-cmds:
-  - cmd: /mles_fuzz_decode_combined
-  - cmd: /mles_fuzz_decode
-  - cmd: /mles_fuzz_msg_decode

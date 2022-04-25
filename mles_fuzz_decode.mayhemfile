@@ -1,0 +1,5 @@
+project: mles
+target: mles_fuzz_decode
+
+cmds:
+  - cmd: /mles_fuzz_decode
